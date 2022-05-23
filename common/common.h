@@ -27,6 +27,7 @@ void check(T result, char const *const func, const char *const file, int const l
 template<template<typename> typename ReductionOp, typename T>
 __device__ __forceinline__
 T WarpReduce(T val) {
+    #pragma unroll
     for (int offset = 16; offset > 0; offset /= 2) {
         val = ReductionOp<T>()(val, __shfl_down_sync(0xffffffff, val, offset));
     }
@@ -175,11 +176,15 @@ namespace shape {
         __device__ __host__
         size_t mnk() const { return this->_m * this->_n * this->_k; }
 
+        std::string to_string() const {
+            return std::string("{") + std::to_string(this->m()) + "," + std::to_string(this->n()) + "," + std::to_string(this->k()) + "}";
+        }
+
     private:
         size_t _m, _n, _k;
     };
 
-    template<int _M, int _N, int _K>
+    template<int _M, int _N>
     struct MatrixShape {
         static const int kM = _M;
         static const int kN = _N;
@@ -196,6 +201,10 @@ namespace shape {
         static const int kKN = kK * kN;
 
         static const int kMNK = kM * kN * kK;
+
+        static std::string to_string() {
+            return std::string("{") + std::to_string(kM) + "," + std::to_string(kN) + "," + std::to_string(kK) + "}";
+        }
     };
 }
 #endif //KERNEL_OPTIMIZATION_COMMON_H

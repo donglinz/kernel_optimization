@@ -2,13 +2,14 @@
 // Created by dongl on 5/13/2022.
 //
 
+#include <random>
+
 #include <cuda.h>
 #include <vector>
 #include <cuda_runtime.h>
 #include "softmax.h"
 #include "../../common/tensor.h"
 #include "../../common/common.h"
-#include <random>
 
 template<
         typename T,

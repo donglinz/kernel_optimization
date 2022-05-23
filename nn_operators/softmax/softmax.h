@@ -21,7 +21,7 @@ struct SoftMaxWarpImpl {
         static_assert(num_column % vec_len == 0, "Unaligned vectorized access");
         using AccessType = AlignedArray<T, vec_len>;
         static const int column_per_thread = ((num_column / vec_len) + 32 - 1) / 32;
-        AccessType  in_data_buffer[column_per_thread];
+        AccessType in_data_buffer[column_per_thread];
 
         const int lane_id = threadIdx.x % 32;
         const int warp_id_block = threadIdx.x / 32;
@@ -39,15 +39,13 @@ struct SoftMaxWarpImpl {
             }
 
             T reduce_max = WarpReduce<ReduceMax, T>(to_scalar<ReduceMax<T>, T, vec_len>(tmp));
-
             reduce_max = __shfl_sync(0xffffffff, reduce_max, 0);
 
             tmp = T(0);
             for (int col_id = lane_id; col_id < num_column / vec_len; col_id += 32) {
-                AccessType &in_data_element = in_data_buffer[col_id / 32];
-                in_data_element = Exp<AccessType>()(Subtract<AccessType>()(in_data_element, reduce_max));
+                in_data_buffer[col_id / 32] = Exp<AccessType>()(Subtract<AccessType>()(in_data_buffer[col_id / 32], reduce_max));
 
-                tmp = ReduceSum<AccessType>()(tmp, in_data_element);
+                tmp = ReduceSum<AccessType>()(tmp, in_data_buffer[col_id / 32]);
             }
 
             T reduce_sum = WarpReduce<ReduceSum, T>(to_scalar<ReduceSum<T>, T, vec_len>(tmp));

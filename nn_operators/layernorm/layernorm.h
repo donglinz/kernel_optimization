@@ -184,7 +184,7 @@ struct LayerNormWarpImpl {
             Element div = Rsqrt<Element>()(m2 + epsilon);
             for (int col_id = lane_id; col_id < num_column / vec_len; col_id += 32) {
                 AccessType &in_data_element = in_data_buffer[col_id / 32];
-                AccessType result = Divide<AccessType>()(Subtract<AccessType>()(in_data_element, mean), div);
+                AccessType result = Multiply<AccessType>()(Subtract<AccessType>()(in_data_element, mean), div);
 
                 if (elementwise_affine) {
                     AccessType gamma_val = *reinterpret_cast<AccessType *>(gamma + col_id * vec_len);
@@ -235,7 +235,7 @@ struct LayerNormBlockImpl {
             Element div = Rsqrt<Element>()(m2 + epsilon);
             for (int col_id = threadIdx.x; col_id < num_column / vec_len; col_id += blockDim.x) {
                 AccessType &in_data_element = reinterpret_cast<AccessType *>(s_data_cache)[col_id];
-                AccessType result = Divide<AccessType>()(Subtract<AccessType>()(in_data_element, mean), div);
+                AccessType result = Multiply<AccessType>()(Subtract<AccessType>()(in_data_element, mean), div);
 
                 if (elementwise_affine) {
                     AccessType gamma_val = *reinterpret_cast<AccessType *>(gamma + col_id * vec_len);
@@ -273,7 +273,7 @@ struct LayerNormBlockNoCacheImpl {
             AccessType thread_m2 = 0;
 
             for (int col_id = threadIdx.x; col_id < num_column / vec_len; col_id += blockDim.x) {
-                AccessType in_data_element = *reinterpret_cast<AccessType *>(in_data + row_id * num_column + col_id * vec_len);
+                AccessType in_data_element = *reinterpret_cast<AccessType *>(in_data + row_id * num_column + col_id * vec_len); // read global
                 WelfordUpdate<AccessType>()(thread_count, thread_mean, thread_m2, in_data_element);
             }
 
@@ -282,8 +282,8 @@ struct LayerNormBlockNoCacheImpl {
 
             Element div = Rsqrt<Element>()(m2 + epsilon);
             for (int col_id = threadIdx.x; col_id < num_column / vec_len; col_id += blockDim.x) {
-                AccessType in_data_element = *reinterpret_cast<AccessType *>(in_data + row_id * num_column + col_id * vec_len);
-                AccessType result = Divide<AccessType>()(Subtract<AccessType>()(in_data_element, mean), div);
+                AccessType in_data_element = *reinterpret_cast<AccessType *>(in_data + row_id * num_column + col_id * vec_len); // read global
+                AccessType result = Multiply<AccessType>()(Subtract<AccessType>()(in_data_element, mean), div);
 
                 if (elementwise_affine) {
                     AccessType gamma_val = *reinterpret_cast<AccessType *>(gamma + col_id * vec_len);

@@ -95,7 +95,7 @@ struct alignas(sizeof(T) * N) AlignedArray {
     }
 
     __device__ __host__
-   const  T &operator [] (int offset) const {
+    const T &operator [] (int offset) const {
         return reinterpret_cast<const T &>(this->buffer[offset * sizeof(Element)]);
     }
 

@@ -8,16 +8,6 @@
 #include "../../common/common.h"
 #include "../../common/functors.h"
 
-__device__ __forceinline__
-int divide_up(const int &a, const int &b) {
-    return (a + b - 1) / b;
-}
-
-__device__ __forceinline__
-constexpr int const_max(const int &a, const int &b) {
-    return a > b ? a : b;
-}
-
 namespace thread_mapping {
     template<
             typename ThreadBlockShape,
@@ -272,24 +262,6 @@ struct GemmKernelSimt {
 
         this->store_A_to_smem(problem_size, reinterpret_cast<ElementA *>(As[0]), frag_a);
         this->store_B_to_smem(problem_size, reinterpret_cast<ElementB *>(Bs[0]), frag_b);
-
-//        __syncthreads();
-//        if (threadIdx.x == 0 && blockIdx.x == 0) {
-//            for (int i = 0; i < ThreadBlockShape::kM; ++i) {
-//                for (int j = 0; j < ThreadBlockShape::kK; ++j) {
-//                    printf("%.2f\t", As[0][i][j]);
-//                }
-//                printf("*\n");
-//            }
-//
-//            printf("==========\n");
-//            for (int i = 0; i < ThreadBlockShape::kK; ++i) {
-//                for (int j = 0; j < ThreadBlockShape::kN; ++j) {
-//                    printf("%.2f\t", Bs[0][i][j]);
-//                }
-//                printf("*\n");
-//            }
-//        }
 
         const int lane_id = threadIdx.x % 32;
         const int warp_id = threadIdx.x / 32;

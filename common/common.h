@@ -24,6 +24,16 @@ void check(T result, char const *const func, const char *const file, int const l
 
 #define checkCudaErrors(val) check((val), #val, __FILE__, __LINE__)
 
+__device__ __forceinline__
+int divide_up(const int &a, const int &b) {
+    return (a + b - 1) / b;
+}
+
+__device__ __forceinline__
+constexpr int const_max(const int &a, const int &b) {
+    return a > b ? a : b;
+}
+
 template<template<typename> typename ReductionOp, typename T>
 __device__ __forceinline__
 T WarpReduce(T val) {

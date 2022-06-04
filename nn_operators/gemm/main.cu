@@ -47,12 +47,14 @@ void benchmark(const shape::GemmCoord &problem_size) {
     std::normal_distribution<double> dist(0, 1);
     for (int idx = 0; idx < problem_size.mk(); ++idx) {
         A.template host_ref<ElementA>()[idx] = ElementA(dist(generator));
-//        A.template host_ref<ElementA>()[idx] = 1;
+//        A.template host_ref<ElementA>()[idx] = ElementA(1);
     }
 
     for (int idx = 0; idx < problem_size.kn(); ++idx) {
         B.template host_ref<ElementB>()[idx] = ElementB(dist(generator));
-//        B.template host_ref<ElementB>()[idx] = 1;
+//        int r = idx / problem_size.n();
+//        int c = idx % problem_size.n();
+//        B.template host_ref<ElementB>()[idx] = (r == c ? 1 : 0);
     }
 
     for (int idx = 0; idx < problem_size.mn(); ++idx) {
@@ -213,20 +215,22 @@ void tensor_core_benchmark(const shape::GemmCoord &problem_size) {
     std::default_random_engine generator;
     std::normal_distribution<double> dist(0, 1);
     for (int idx = 0; idx < problem_size.mk(); ++idx) {
-        A.template host_ref<ElementA>()[idx] = ElementA(dist(generator));
-//        A.template host_ref<ElementA>()[idx] = 1;
+//        A.template host_ref<ElementA>()[idx] = ElementA(dist(generator));
+        A.template host_ref<ElementA>()[idx] = ElementA(idx / 1024);
     }
 
     for (int idx = 0; idx < problem_size.kn(); ++idx) {
-        B.template host_ref<ElementB>()[idx] = ElementB(dist(generator));
-//        B.template host_ref<ElementB>()[idx] = 1;
+//        B.template host_ref<ElementB>()[idx] = ElementB(dist(generator));
+        int r = idx / problem_size.n();
+        int c = idx % problem_size.n();
+        B.template host_ref<ElementB>()[idx] = ElementB(r == c ? 1 : 0);
     }
 
     for (int idx = 0; idx < problem_size.mn(); ++idx) {
         int r = idx / problem_size.n();
         int c = idx % problem_size.n();
-        C.template host_ref<ElementC>()[idx] = ElementC(dist(generator));
-//        C.template host_ref<ElementC>()[idx] = 0;
+//        C.template host_ref<ElementC>()[idx] = ElementC(dist(generator));
+        C.template host_ref<ElementC>()[idx] = ElementC(0);
         C_transpose.template host_ref<ElementC>()[c * problem_size.m() + r] = C.template host_ref<ElementC>()[idx];
     }
 
@@ -301,8 +305,7 @@ void tensor_core_benchmark(const shape::GemmCoord &problem_size) {
 
     D.device_to_host_async(stream);
     checkCudaErrors(cudaStreamSynchronize(stream));
-    ElementC alpha = 1.0, beta = 1.0;
-
+    ElementC alpha = ElementC(1.0), beta = ElementC(1.0);
 
     checkCudaErrors(cudaStreamSynchronize(stream));
 
@@ -324,12 +327,6 @@ void tensor_core_benchmark(const shape::GemmCoord &problem_size) {
         int col = idx % problem_size.n();
         auto cal_value = double(D.template host_ref<ElementC>()[idx]);
         auto ref_value = double(C_transpose.template host_ref<ElementC>()[col * problem_size.m() + row]);
-//        ElementC ref_value = 0;
-//        for (int k = 0; k < problem_size.k(); ++k) {
-//            ref_value += A.template host_ref<ElementA>()[row * problem_size.k() + k] * B.template host_ref<ElementB>()[k * problem_size.n() + col];
-//        }
-//
-//        ref_value += C.template host_ref<ElementC>()[row * problem_size.n() + col];
 
         double absolute_err = fabs(cal_value - ref_value);
         if (absolute_err > 1e-3) {
@@ -342,8 +339,9 @@ void tensor_core_benchmark(const shape::GemmCoord &problem_size) {
 }
 
 int main () {
-    benchmark<float, float, float, shape::GemmShape<128, 128, 8>, shape::GemmShape<64, 32, 8>, 4, 4, 4>({1024, 1024, 1024});
-    tensor_core_benchmark<half, half, half, shape::GemmShape<128, 128, 64>, shape::GemmShape<64, 64, 64>, shape::GemmShape<16, 8, 8>, 8, 8, 8>({1024, 1024, 1024});
+    // 60% cublas performance
+    benchmark<float, float, float, shape::GemmShape<64, 64, 8>, shape::GemmShape<32, 32, 8>, 4, 4, 4>({1024, 1024, 1024});
+//    tensor_core_benchmark<half, half, half, shape::GemmShape<128, 128, 32>, shape::GemmShape<64, 64, 32>, shape::GemmShape<16, 8, 8>, 8, 8, 8>({1024, 1024, 1024});
     return 0;
 }
 

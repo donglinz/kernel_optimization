@@ -4,8 +4,8 @@ project(kernel-optimization)
 
 set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc)
 set(CMAKE_CUDA_STANDARD 17)
-set(CMAKE_CUDA_ARCHITECTURES 75 80)
-set(CMAKE_CUDA_FLAGS "-use_fast_math -lineinfo")
+set(CMAKE_CUDA_ARCHITECTURES 75)
+set(CMAKE_CUDA_FLAGS "-use_fast_math -lineinfo -Xptxas=-v")
 
 add_subdirectory(common)
 add_subdirectory(nn_operators)

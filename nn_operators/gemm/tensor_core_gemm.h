@@ -119,8 +119,8 @@ struct GemmKernelTensorCore {
     static_assert(ThreadBlockShape::kN % AlignmentB == 0, "");
     static_assert(ThreadBlockShape::kN % AlignmentC == 0, "");
 
-    static const int smem_A_total_size_in_bytes = ThreadBlockShape::kMK * sizeof(ElementA);
-    static const int smem_B_total_size_in_bytes = ThreadBlockShape::kKN * sizeof(ElementB);
+    static const int smem_A_total_size_in_bytes = ThreadBlockShape::kMK * sizeof(ElementA) * 2;
+    static const int smem_B_total_size_in_bytes = ThreadBlockShape::kKN * sizeof(ElementB) * 2;
 
     static const int smem_total_size_in_bytes = smem_A_total_size_in_bytes + smem_B_total_size_in_bytes;
 
@@ -148,8 +148,8 @@ struct GemmKernelTensorCore {
 
     using WarpFragmentA = AlignedArray<uint32_t, 2>;
     using WarpFragmentB = AlignedArray<uint32_t, 1>;
-    using WarpFragmentC = AlignedArray<float, 4>;
-    using WarpFragmentD = AlignedArray<float, 4>;
+    using WarpFragmentC = AlignedArray<ElementC, 4>;
+    using WarpFragmentD = AlignedArray<ElementC, 4>;
     using WarpAggregateFragmentA = AlignedArray<uint32_t, WarpFragmentA::kElements * WarpThreadMap::steps_m>;
     using WarpAggregateFragmentB = AlignedArray<uint32_t, WarpFragmentB::kElements * WarpThreadMap::steps_n>;
 
@@ -215,7 +215,7 @@ struct GemmKernelTensorCore {
         #pragma unroll
         for (int idx_n = 0; idx_n < WarpThreadMap::steps_n; ++idx_n) {
             WarpFragmentB &warp_frag_b = reinterpret_cast<WarpFragmentB *>(&warp_aggregate_frag_b)[idx_n];
-            LDMatrix<1, true>()(&warp_frag_b, smem_ptr + ((lane_id % 8) + idx_n * InstructionShape::kN));
+            LDMatrix<1, true>()(&warp_frag_b, smem_ptr + (lane_id % 8) * ThreadBlockShape::kN + idx_n * InstructionShape::kN);
         }
     }
 
@@ -260,6 +260,27 @@ struct GemmKernelTensorCore {
         this->store_A_to_smem(problem_size, reinterpret_cast<ElementA *>(As[0]), frag_a);
         this->store_B_to_smem(problem_size, reinterpret_cast<ElementB *>(Bs[0]), frag_b);
 
+//        __syncthreads();
+//        if (threadIdx.x == 0 && blockIdx.x == 0) {
+//            for (int i = 0; i < ThreadBlockShape::kM; ++i) {
+//                printf("Row %d: ", i);
+//                for (int j = 0; j < ThreadBlockShape::kK; ++j) {
+//                    printf("%.2f\t\t", (float) As[0][i][j]);
+//                }
+//                printf("\n");
+//            }
+//
+//            printf("==========\n");
+//
+//            for (int i = 0; i < ThreadBlockShape::kK; ++i) {
+//                printf("Row %d: ", i);
+//                for (int j = 0; j < ThreadBlockShape::kN; ++j) {
+//                    printf("%.2f\t\t", (float) Bs[0][i][j]);
+//                }
+//                printf("\n");
+//            }
+//        }
+
         const int warp_id = threadIdx.x / 32;
 
         #pragma unroll(1)
@@ -274,6 +295,19 @@ struct GemmKernelTensorCore {
 
             this->load_warp_aggregate_frag_A_from_smem(reinterpret_cast<ElementA *>(As[gemm_main_loop_id % 2]) + smem_ptr_A_offset, warp_aggregate_frag_a[0]);
             this->load_warp_aggregate_frag_B_from_smem(reinterpret_cast<ElementB *>(Bs[gemm_main_loop_id % 2]) + smem_ptr_B_offset, warp_aggregate_frag_b[0]);
+
+//            if (blockIdx.x == 0 && warp_id == 0) {
+//                const int lane_id = threadIdx.x % 32;
+//                WarpFragmentA &data1 = reinterpret_cast<WarpFragmentA *>(&warp_aggregate_frag_a[0])[0];
+//                WarpFragmentB &data2 = reinterpret_cast<WarpFragmentB *>(&warp_aggregate_frag_b[0])[0];
+////                int row = lane_id / 4;
+////                int col = ((lane_id % 4) * 2);
+////                printf("Pos: %d:%d %.2f %.2f\n", row, col, (float)reinterpret_cast<ElementA *>(&data1)[0], (float)reinterpret_cast<ElementA *>(&data1)[1]);
+//                int row = lane_id / 4;
+//                int col = lane_id % 4;
+//                printf("lane_id: %d %.2f %.2f\n", lane_id, (float)reinterpret_cast<ElementB *>(&data2)[0], (float)reinterpret_cast<ElementB *>(&data2)[1]);
+//            }
+
 //            smem_ptr_A_offset += ThreadBlockShape::kM;
             smem_ptr_A_offset += InstructionShape::kK;
             smem_ptr_B_offset += InstructionShape::kK * ThreadBlockShape::kN;
@@ -318,12 +352,49 @@ struct GemmKernelTensorCore {
                        ptr_B + block_id_n * ThreadBlockShape::kN,
                        accum);
 
+        const int lane_id = threadIdx.x % 32;
         const int warp_id = threadIdx.x / 32;
 
         const int warp_id_m = warp_id / BlockThreadMap::warp_count_n;
         const int warp_id_n = warp_id % BlockThreadMap::warp_count_n;
+        const int lane_id_m = lane_id / 4;
+        const int lane_id_n = (lane_id % 4) * 2;
 
-        
+        const int offset_m = block_id_m * ThreadBlockShape::kM + warp_id_m * WarpShape::kM + lane_id_m;
+        const int offset_n = block_id_n * ThreadBlockShape::kN + warp_id_n * WarpShape::kN + lane_id_n;
+
+        if (ptr_C) {
+            for (int warp_step_id_m = 0; warp_step_id_m < WarpThreadMap::steps_m; ++warp_step_id_m) {
+                int warp_step_offset_m = warp_step_id_m * InstructionShape::kM;
+                for (int warp_step_id_n = 0; warp_step_id_n < WarpThreadMap::steps_n; ++warp_step_id_n) {
+                    int warp_step_offset_n = warp_step_id_n * InstructionShape::kN;
+                    int offset_c1 = (offset_m + warp_step_offset_m) * problem_size.n() + (offset_n + warp_step_offset_n);
+                    int offset_c2 = (offset_m + warp_step_offset_m + 8) * problem_size.n() + (offset_n + warp_step_offset_n);
+                    AlignedArray<ElementC, 2> accum_frag1 = *reinterpret_cast<AlignedArray<ElementC, 2> *>(ptr_C + offset_c1);
+                    AlignedArray<ElementC, 2> accum_frag2 = *reinterpret_cast<AlignedArray<ElementC, 2> *>(ptr_C + offset_c2);
+
+                    accum_frag1 = Add<AlignedArray<ElementC, 2>>()(accum_frag1, *reinterpret_cast<AlignedArray<ElementC, 2> *>(&accum[lane_id_m * 8 + lane_id_n]));
+                    accum_frag2 = Add<AlignedArray<ElementC, 2>>()(accum_frag2, *reinterpret_cast<AlignedArray<ElementC, 2> *>(&accum[(lane_id_m + 8) * 8 + lane_id_n]));
+
+                    *reinterpret_cast<AlignedArray<ElementC, 2> *>(ptr_D + offset_c1) = accum_frag1;
+                    *reinterpret_cast<AlignedArray<ElementC, 2> *>(ptr_D + offset_c2) = accum_frag2;
+                }
+            }
+        } else {
+            for (int warp_step_id_m = 0; warp_step_id_m < WarpThreadMap::steps_m; ++warp_step_id_m) {
+                int warp_step_offset_m = warp_step_id_m * InstructionShape::kM;
+                for (int warp_step_id_n = 0; warp_step_id_n < WarpThreadMap::steps_n; ++warp_step_id_n) {
+                    int warp_step_offset_n = warp_step_id_n * InstructionShape::kN;
+                    int offset_c1 = (offset_m + warp_step_offset_m) * problem_size.n() + (offset_n + warp_step_offset_n);
+                    int offset_c2 = (offset_m + warp_step_offset_m + 8) * problem_size.n() + (offset_n + warp_step_offset_n);
+
+                    *reinterpret_cast<AlignedArray<ElementC, 2> *>(ptr_D + offset_c1) =
+                                *reinterpret_cast<AlignedArray<ElementC, 2> *>(&accum[lane_id_m * 8 + lane_id_n]);
+                    *reinterpret_cast<AlignedArray<ElementC, 2> *>(ptr_D + offset_c2) =
+                                *reinterpret_cast<AlignedArray<ElementC, 2> *>(&accum[(lane_id_m + 8) * 8 + lane_id_n]);
+                }
+            }
+        }
     }
 };
 

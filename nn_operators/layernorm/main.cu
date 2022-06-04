@@ -11,6 +11,8 @@
 #include <random>
 
 template<
+        int grid_dim,
+        int block_dim,
         typename T,
         template<typename, int, int, int, bool> typename LayerNorm,
         int vec_len,
@@ -38,12 +40,7 @@ void run_benchmark() {
         checkCudaErrors(cudaFuncSetAttribute(layer_normalization<LayerNormKernel>, cudaFuncAttributeMaxDynamicSharedMemorySize, LayerNormKernel::smem_in_bytes));
     }
 
-    // warp up
-    for (int idx = 0; idx < 10; ++idx) {
-        layer_normalization<LayerNormKernel>
-        <<<108*4, 128, LayerNormKernel::smem_in_bytes, stream>>>
-        (in_data.template device_ref<T>(), out_data.template device_ref<T>(), 0.0001);
-    }
+    int n_iter = 1;
 
     checkCudaErrors(cudaStreamSynchronize(stream));
 
@@ -53,12 +50,12 @@ void run_benchmark() {
 
     float time_in_ms = 0;
 
-    for (int idx = 0; idx < 10; ++idx) {
+    for (int idx = 0; idx < n_iter; ++idx) {
         in_data.host_to_device_async(stream);
 
         checkCudaErrors(cudaEventRecord(_start, stream));
         layer_normalization<LayerNormKernel>
-        <<<108*4, 128, LayerNormKernel::smem_in_bytes, stream>>>
+        <<<grid_dim, block_dim, LayerNormKernel::smem_in_bytes, stream>>>
         (in_data.template device_ref<T>(), out_data.template device_ref<T>(), 0.0001);
         checkCudaErrors(cudaEventRecord(_stop, stream));
 
@@ -72,11 +69,11 @@ void run_benchmark() {
     checkCudaErrors(cudaStreamSynchronize(stream));
 
     printf("======Num row %d, num column %d======\n", num_row, num_column);
-    printf("Average time %.2fms\n", time_in_ms / 10);
+    printf("Average time %.2fms\n", time_in_ms / n_iter);
 }
 int main() {
-    run_benchmark<float, LayerNormWarpImpl, 4, 49152, 1024>();
-    run_benchmark<float, LayerNormBlockImpl, 4, 49152, 1024>();
-    run_benchmark<float, LayerNormBlockNoCacheImpl, 4, 49152, 1024>();
+    run_benchmark<40*8, 128, float, LayerNormWarpImpl, 4, 128 * 128, 768>();
+    run_benchmark<40*16, 64, float, LayerNormBlockImpl, 4, 128 * 128, 768>();
+//    run_benchmark<float, LayerNormBlockNoCacheImpl, 4, 49152, 1024>();
     return 0;
 }

@@ -8,6 +8,7 @@
 #include "../../common/common.h"
 #include "../../common/functors.h"
 
+
 namespace thread_mapping {
     template<
             typename ThreadBlockShape,
@@ -24,6 +25,7 @@ namespace thread_mapping {
 
         static const int element_per_thread_m = 4;
         static const int element_per_thread_n = 4;
+        static const int element_per_thread = element_per_thread_m * element_per_thread_n;
 
         static_assert(WarpShape::kM % (thread_count_m * element_per_thread_m) == 0, "");
         static_assert(WarpShape::kN % (thread_count_n * element_per_thread_n) == 0, "");
@@ -89,17 +91,16 @@ struct GemmKernelSimt {
     using BlockThreadMap = thread_mapping::ThreadBlockThreadMap<ThreadBlockShape, WarpShape>;
 
     static_assert(WarpThreadMap::element_per_thread_m * WarpThreadMap::element_per_thread_n * WarpThreadMap::steps_m * WarpThreadMap::steps_n == FragmentC::kElements, "");
-
     static_assert(WarpThreadMap::element_per_thread_m % AccessTypeA::kElements == 0, "");
     static_assert(WarpThreadMap::element_per_thread_n % AccessTypeB::kElements == 0, "");
+    static_assert(FragmentA::kElements % AlignmentA == 0, "");
+    static_assert(FragmentB::kElements % AlignmentB == 0, "");
+    static_assert(FragmentC::kElements % AlignmentC == 0, "");
 
     using WarpFragmentA = AlignedArray<ElementA, WarpThreadMap::element_per_thread_m>;
     using WarpFragmentB = AlignedArray<ElementB, WarpThreadMap::element_per_thread_n>;
     using WarpAggregateFragmentA = AlignedArray<ElementA, WarpThreadMap::element_per_thread_m * WarpThreadMap::steps_m>;
     using WarpAggregateFragmentB = AlignedArray<ElementA, WarpThreadMap::element_per_thread_n * WarpThreadMap::steps_n>;
-
-    using SmemAPointerType = ElementA (*)[ThreadBlockShape::kK][ThreadBlockShape::kM];
-    using SmemBPointerType = ElementB (*)[ThreadBlockShape::kK][ThreadBlockShape::kN];
 
     __device__ __forceinline__
     void load_A_from_global(const shape::GemmCoord &problem_size, ElementA *ptr, FragmentA &frag_a) {
@@ -129,20 +130,6 @@ struct GemmKernelSimt {
     void store_A_to_smem(const shape::GemmCoord &problem_size, ElementA *smem_ptr, const FragmentA &frag_a) {
         ElementA (*smem_array_ptr)[ThreadBlockShape::kK + 1] =
                 reinterpret_cast<ElementA (*)[ThreadBlockShape::kK + 1]>(smem_ptr);
-
-//        // Note that A in smem is transposed
-//        #pragma unroll
-//        for (int idx = threadIdx.x; idx < ThreadBlockShape::kMK / AlignmentA; idx += thread_per_block) {
-//            const AccessTypeA &data = reinterpret_cast<const AccessTypeA *>(&frag_a)[idx / thread_per_block];
-//
-//            int tb_m = idx / (ThreadBlockShape::kK / AlignmentA);
-//            int tb_n = (idx % (ThreadBlockShape::kK / AlignmentA)) * AlignmentA;
-//
-//            #pragma unroll
-//            for (int offset = 0; offset < AccessTypeA::kElements; ++offset) {
-//                smem_array_ptr[tb_n + offset][tb_m] = data[offset];
-//            }
-//        }
         #pragma unroll
         for (int idx = threadIdx.x; idx < ThreadBlockShape::kMK / AlignmentA; idx += thread_per_block) {
             const AccessTypeA &data = reinterpret_cast<const AccessTypeA *>(&frag_a)[idx / thread_per_block];
@@ -225,10 +212,8 @@ struct GemmKernelSimt {
                     #pragma unroll
                     for (int offset_n = 0; offset_n < WarpFragmentB::kElements; ++offset_n) {
                         accum[
-                                idx_m * WarpThreadMap::element_per_thread_m * WarpThreadMap::element_per_thread_n * WarpThreadMap::steps_n +
-                                idx_n * WarpThreadMap::element_per_thread_n +
-                                offset_m * WarpThreadMap::element_per_thread_n * WarpThreadMap::steps_n +
-                                offset_n
+                                (idx_m * WarpThreadMap::steps_n + idx_n) * WarpThreadMap::element_per_thread +
+                                offset_m * WarpThreadMap::element_per_thread_n + offset_n
                                 ] += warp_frag_a[offset_m] * warp_frag_b[offset_n];
                     }
                 }
@@ -319,7 +304,8 @@ struct GemmKernelSimt {
         const int block_id_m = blockIdx.x / tb_per_column;
         const int block_id_n = blockIdx.x % tb_per_column;
 
-        FragmentC accum = 0;
+        FragmentC accum;
+        accum.clear();
         gemm_main_loop(problem_size,
                        ptr_A + block_id_m * ThreadBlockShape::kM * problem_size.k(),
                         ptr_B + block_id_n * ThreadBlockShape::kN,
@@ -388,5 +374,5 @@ struct GemmKernelSimt {
     }
 };
 
-
 #endif //KERNEL_OPTIMIZATION_SIMT_GEMM_H
+

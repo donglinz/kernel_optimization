@@ -68,7 +68,6 @@ template<typename T, int N>
 struct alignas(sizeof(T) * N) AlignedArray {
     using Element = T;
     static const int kElements = N;
-    static const int buffer_size_in_bytes = sizeof(Element) * kElements;
 
     __device__ __host__
     AlignedArray() {}
@@ -80,47 +79,60 @@ struct alignas(sizeof(T) * N) AlignedArray {
             this->at(idx) = rhs;
         }
     }
+//
+//    __device__ __host__
+//    AlignedArray(const AlignedArray<T, N> &rhs) {
+//        #pragma unroll
+//        for (int idx = 0; idx < kElements; ++idx) {
+//            this->at(idx) = rhs[idx];
+//        }
+//    }
 
-    __device__ __host__
-    AlignedArray(const AlignedArray<T, N> &rhs) {
-        #pragma unroll
-        for (int idx = 0; idx < kElements; ++idx) {
-            this->at(idx) = rhs[idx];
-        }
-    }
-
-    __device__ __host__
-    AlignedArray<T, N> &operator= (const AlignedArray<T, N> &rhs) {
-        #pragma unroll
-        for (int idx = 0; idx < kElements; ++idx) {
-            this->at(idx) = rhs[idx];
-        }
-
-        return *this;
-    }
+//    __device__ __host__
+//    AlignedArray<T, N> &operator= (const AlignedArray<T, N> &rhs) {
+//        #pragma unroll
+//        for (int idx = 0; idx < kElements; ++idx) {
+//            this->at(idx) = rhs[idx];
+//        }
+//
+//        return *this;
+//    }
 
     __device__ __host__
     T &operator [] (int offset) {
-        return reinterpret_cast<T &>(this->buffer[offset * sizeof(Element)]);
+        return reinterpret_cast<T &>(this->buffer[offset]);
     }
 
     __device__ __host__
     const T &operator [] (int offset) const {
-        return reinterpret_cast<const T &>(this->buffer[offset * sizeof(Element)]);
+        return reinterpret_cast<const T &>(this->buffer[offset]);
     }
 
     __device__ __host__
     T &at(int offset) {
-        return reinterpret_cast<T &>(this->buffer[offset * sizeof(Element)]);
+        return reinterpret_cast<T &>(this->buffer[offset]);
     }
 
     __device__ __host__
     const T &at(int offset) const {
-        return reinterpret_cast<const T &>(this->buffer[offset * sizeof(Element)]);
+        return reinterpret_cast<const T &>(this->buffer[offset]);
     }
 
-    uint8_t buffer[buffer_size_in_bytes];
+    __device__ __forceinline__
+    void clear() {
+        #pragma unroll
+        for (int idx = 0; idx < kElements; ++idx) {
+            this->at(idx) = Element(0);
+        }
+    }
+
+    Element buffer[N];
 };
+
+//#include <cutlass/array.h>
+//
+//template<typename T, int N>
+//using AlignedArray = cutlass::AlignedArray<T, N>;
 
 
 template<typename ReductionOp, typename T, int N>
@@ -217,4 +229,5 @@ namespace shape {
         }
     };
 }
+
 #endif //KERNEL_OPTIMIZATION_COMMON_H
